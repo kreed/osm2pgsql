@@ -25,6 +25,11 @@
 #include <boost/bind.hpp>
 #include <boost/exception_ptr.hpp>
 #include <boost/format.hpp>
+#include <boost/geometry.hpp>
+#include <boost/geometry/geometries/point_xy.hpp>
+
+#include <osmium/area/geom_assembler.hpp>
+#include <osmium/geom/wkt.hpp>
 
 #include "expire-tiles.hpp"
 #include "middle.hpp"
@@ -38,6 +43,7 @@
 #include "tagtransform.hpp"
 #include "util.hpp"
 #include "wildcmp.hpp"
+#include "osmium-builder.hpp"
 #include "wkb.hpp"
 
 /* make the diagnostic information work with older versions of
@@ -48,6 +54,8 @@
 #else
 #define BOOST_DIAGNOSTIC_INFO(e) boost::diagnostic_information((e))
 #endif
+
+namespace bg = boost::geometry;
 
 /* example from: pg_dump -F p -t planet_osm gis
 COPY planet_osm (osm_id, name, place, landuse, leisure, "natural", man_made, waterway, highway, railway, amenity, tourism, learning, building, bridge, layer, way) FROM stdin;
@@ -330,12 +338,10 @@ int output_pgsql_t::pgsql_process_relation(osmium::Relation const &rel,
     rolelist_t xrole;
     auto num_ways = m_mid->rel_way_members_get(rel, &xrole, buffer);
 
-    if (num_ways == 0)
-        return 0;
-
   int roads = 0;
   int make_polygon = 0;
   int make_boundary = 0;
+  int make_centroid = 0;
   std::vector<int> members_superseded(num_ways, 0);
   taglist_t outtags;
 
@@ -343,8 +349,76 @@ int output_pgsql_t::pgsql_process_relation(osmium::Relation const &rel,
   // otherwise one or the other will be true.
   if (m_tagtransform->filter_rel_member_tags(
           prefiltered_tags, buffer, xrole, &(members_superseded[0]),
-          &make_boundary, &make_polygon, &roads, *m_export_list.get(),
+          &make_boundary, &make_polygon, &make_centroid, &roads, *m_export_list.get(),
           outtags)) {
+      return 0;
+  }
+
+  if (make_centroid) {
+      typedef bg::model::d2::point_xy<double> point_t;
+      typedef bg::model::linestring<point_t> linestring_t;
+      typedef bg::model::polygon<point_t> polygon_t;
+      typedef bg::model::multi_polygon<polygon_t> multipolygon_t;
+      typedef bg::model::multi_point<point_t> multipoint_t;
+
+      multipoint_t centroids;
+      osmium::geom::WKTFactory<> factory;
+      for (const osmium::RelationMember& rm : rel.members()) {
+          if (rm.ref() == 0) continue;
+          buffer.clear();
+          if (rm.type() == osmium::item_type::node) {
+              // FIXME mid-layer has no method to query single nodes. For now,
+              // workaround this by creating a fake way containing our node
+              {
+                  osmium::builder::WayBuilder way_builder{buffer};
+                  way_builder.add_node_refs({osmium::NodeRef (rm.ref(), osmium::Location())});
+              }
+              buffer.commit();
+              auto &way = buffer.get<osmium::Way>(0);
+              auto nnodes = m_mid->nodes_get_list(&(way.nodes()));
+              if (nnodes > 0) {
+                  auto &l = way.nodes()[0].location();
+                  bg::append(centroids, point_t(l.lon(), l.lat()));
+              }
+          } else if (rm.type() == osmium::item_type::way && m_mid->ways_get(rm.ref(), buffer)) {
+              auto &way = buffer.get<osmium::Way>(0);
+              auto nnodes = m_mid->nodes_get_list(&(way.nodes()));
+              if (nnodes > 0) {
+                  if (way.is_closed()) {
+                      osmium::area::AssemblerConfig area_config;
+                      area_config.ignore_invalid_locations = true;
+                      osmium::area::GeomAssembler assembler{area_config};
+                      osmium::memory::Buffer areabuffer{1000};
+                      if (assembler(way, areabuffer)) {
+                          auto wkt = factory.create_multipolygon(areabuffer.get<osmium::Area>(0));
+                          multipolygon_t poly;
+                          point_t p;
+                          bg::read_wkt(wkt, poly);
+                          bg::centroid(poly, p);
+                          bg::append(centroids, p);
+                      }
+                  } else {
+                      auto wkt = factory.create_linestring(way.nodes());
+                      linestring_t line;
+                      point_t p;
+                      bg::read_wkt(wkt, line);
+                      bg::centroid(line, p);
+                      bg::append(centroids, p);
+                  }
+              }
+          } else if (rm.type() == osmium::item_type::relation) {
+              // FIXME implement (need to at least handle multipolygons)
+          }
+      }
+
+      if (!bg::is_empty(centroids)) {
+          point_t centroid;
+          bg::centroid(centroids, centroid);
+          auto wkb = m_builder.get_wkb_node(osmium::Location(centroid.x(), centroid.y()));
+          expire.from_wkb(wkb.c_str(), -rel.id());
+          m_tables[t_point]->write_row(-rel.id(), outtags, wkb);
+      }
+
       return 0;
   }
 
@@ -418,7 +492,7 @@ int output_pgsql_t::relation_add(osmium::Relation const &rel)
 
     /* Only a limited subset of type= is supported, ignore other */
     if (strcmp(type, "route") != 0 && strcmp(type, "multipolygon") != 0
-        && strcmp(type, "boundary") != 0) {
+        && strcmp(type, "boundary") != 0 && strcmp(type, "site") != 0) {
         return 0;
     }
 

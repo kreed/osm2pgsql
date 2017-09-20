@@ -23,7 +23,7 @@ public:
                                 osmium::memory::Buffer const &members,
                                 rolelist_t const &member_roles,
                                 int *member_superseded, int *make_boundary,
-                                int *make_polygon, int *roads,
+                                int *make_polygon, int *make_centroid, int *roads,
                                 export_list const &exlist, taglist_t &out_tags,
                                 bool allow_typeless = false) override;
 

@@ -119,7 +119,7 @@ bool lua_tagtransform_t::filter_tags(osmium::OSMObject const &o, int *polygon,
 bool lua_tagtransform_t::filter_rel_member_tags(
     taglist_t const &rel_tags, osmium::memory::Buffer const &members,
     rolelist_t const &member_roles, int *member_superseded, int *make_boundary,
-    int *make_polygon, int *roads, export_list const &, taglist_t &out_tags,
+    int *make_polygon, int *make_centroid, int *roads, export_list const &, taglist_t &out_tags,
     bool)
 {
     size_t num_members = member_roles.size();
@@ -157,7 +157,7 @@ bool lua_tagtransform_t::filter_rel_member_tags(
 
     lua_pushnumber(L, num_members);
 
-    if (lua_pcall(L, 4, 6, 0)) {
+    if (lua_pcall(L, 4, 7, 0)) {
         fprintf(
             stderr,
             "Failed to execute lua function for relation tag processing: %s\n",
@@ -167,6 +167,8 @@ bool lua_tagtransform_t::filter_rel_member_tags(
     }
 
     *roads = (int)lua_tointeger(L, -1);
+    lua_pop(L, 1);
+    *make_centroid = (int)lua_tointeger(L, -1);
     lua_pop(L, 1);
     *make_polygon = (int)lua_tointeger(L, -1);
     lua_pop(L, 1);

@@ -207,7 +207,7 @@ bool c_tagtransform_t::filter_tags(osmium::OSMObject const &o, int *polygon,
 bool c_tagtransform_t::filter_rel_member_tags(
     taglist_t const &rel_tags, osmium::memory::Buffer const &members,
     rolelist_t const &member_roles, int *member_superseded, int *make_boundary,
-    int *make_polygon, int *roads, export_list const &exlist,
+    int *make_polygon, int *make_centroid, int *roads, export_list const &exlist,
     taglist_t &out_tags, bool allow_typeless)
 {
     auto const &infos = exlist.get(osmium::item_type::way);

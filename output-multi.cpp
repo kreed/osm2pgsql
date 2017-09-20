@@ -375,12 +375,12 @@ int output_multi_t::process_relation(osmium::Relation const &rel,
         //TODO: find a less hacky way to do the matching/superseded and tag copying stuff without
         //all this trickery
         int roads;
-        int make_boundary, make_polygon;
+        int make_boundary, make_polygon, make_centroid;
         taglist_t outtags;
         filter = m_tagtransform->filter_rel_member_tags(
             rel_outtags, m_relation_helper.data, m_relation_helper.roles,
             &m_relation_helper.superseded.front(), &make_boundary,
-            &make_polygon, &roads, *m_export_list.get(), outtags, true);
+            &make_polygon, &make_centroid, &roads, *m_export_list.get(), outtags, true);
         if (!filter)
         {
             m_relation_helper.add_way_locations((middle_t *)m_mid);
