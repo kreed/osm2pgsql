@@ -40,7 +40,7 @@ public:
     void reset_used() { _used = 0; }
     void inc_used() { _used += 2; }
     void dec_used() { _used -= 2; }
-    void set_used(int used) { _used = (used << 1) || (_used & 1); }
+    void set_used(int used) { _used = (used << 1) != 0 || (_used & 1) != 0; }
     int used() const { return _used >> 1; }
 
     osmium::Location *nodes;
